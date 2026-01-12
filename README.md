@@ -51,11 +51,11 @@ the standard. This includes verifying or generating linear or block
 hashes.
 
 ## Installation (Linux)
----
+```
 $ mkdir build && cd build
 $ cmake ..
 $ make
----
+```
 
 ## Copyright
 
