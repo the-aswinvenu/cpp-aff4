@@ -52,9 +52,9 @@ specific language governing permissions and limitations under the License.
 // Windows defines this macro which interfers with glog's version.
 #undef ERROR
 
-#include "aff4/lexicon.h"
-#include "aff4/aff4_errors.h"
-#include "aff4/rdf.h"
+#include "lexicon.h"
+#include "aff4_errors.h"
+#include "rdf.h"
 
 namespace aff4 {
 

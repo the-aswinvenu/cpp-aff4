@@ -18,8 +18,8 @@ specific language governing permissions and limitations under the License.
 
 #include "aff4/config.h"
 
-#include "aff4/aff4_base.h"
-#include "aff4/threadpool.h"
+#include "aff4_base.h"
+#include "threadpool.h"
 #include "spdlog/spdlog.h"
 
 #include <unordered_map>
@@ -28,10 +28,10 @@ specific language governing permissions and limitations under the License.
 #include <string>
 #include <memory>
 #include <fstream>
-#include "aff4/aff4_utils.h"
+#include "aff4_utils.h"
 #include <string.h>
 
-#include "aff4/rdf.h"
+#include "rdf.h"
 
 namespace aff4 {
 

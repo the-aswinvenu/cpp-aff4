@@ -22,12 +22,12 @@ specific language governing permissions and limitations under the License.
 
 #include "aff4/config.h"
 
-#include "aff4/aff4_errors.h"
-#include "aff4/data_store.h"
-#include "aff4/libaff4.h"
-#include "aff4/rdf.h"
+#include "aff4_errors.h"
+#include "data_store.h"
+#include "libaff4.h"
+#include "rdf.h"
 
-#include "aff4/tclap_parsers.h"
+#include "tclap_parsers.h"
 
 // Supports all integer inputs given as hex.
 #define TCLAP_SETBASE_ZERO 1

@@ -18,8 +18,8 @@ specific language governing permissions and limitations under the License.
 
 #include "aff4/config.h"
 
-#include "aff4/aff4_io.h"
-#include "aff4/volume_group.h"
+#include "aff4_io.h"
+#include "volume_group.h"
 
 #include <map>
 

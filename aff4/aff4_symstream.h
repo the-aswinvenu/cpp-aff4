@@ -8,7 +8,7 @@
 #ifndef SRC_AFF4_SYMSTREAM_H_
 #define SRC_AFF4_SYMSTREAM_H_
 
-#include "aff4/aff4_io.h"
+#include "aff4_io.h"
 
 namespace aff4 {
 

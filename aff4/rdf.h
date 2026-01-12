@@ -22,9 +22,9 @@ specific language governing permissions and limitations under the License.
 #include <string>
 
 // #include "aff4/config.h"
-#include "aff4/aff4_errors.h"
-#include "aff4/aff4_registry.h"
-#include "aff4/aff4_utils.h"
+#include "aff4_errors.h"
+#include "aff4_registry.h"
+#include "aff4_utils.h"
 
 namespace aff4 {
 
@@ -341,6 +341,11 @@ namespace std {
     };
 }
 
-
+template <> struct fmt::formatter<aff4::URN> {
+    constexpr auto parse(format_parse_context& ctx) { return ctx.begin(); }
+    auto format(const aff4::URN& urn, format_context& ctx) const {
+        return format_to(ctx.out(), "{}", urn.SerializeToString());
+    }
+};
 
 #endif  // SRC_RDF_H_

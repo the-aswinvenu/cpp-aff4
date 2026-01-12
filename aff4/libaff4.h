@@ -19,14 +19,14 @@ specific language governing permissions and limitations under the License.
 
 #include "aff4/config.h"
 
-#include "aff4/rdf.h"
-#include "aff4/aff4_io.h"
-#include "aff4/aff4_image.h"
-#include "aff4/aff4_directory.h"
-#include "aff4/aff4_map.h"
-#include "aff4/data_store.h"
-#include "aff4/zip.h"
-#include "aff4/lexicon.h"
+#include "rdf.h"
+#include "aff4_io.h"
+#include "aff4_image.h"
+#include "aff4_directory.h"
+#include "aff4_map.h"
+#include "data_store.h"
+#include "zip.h"
+#include "lexicon.h"
 
 
 namespace aff4 {

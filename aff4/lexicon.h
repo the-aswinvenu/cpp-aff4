@@ -30,14 +30,14 @@ specific language governing permissions and limitations under the License.
  *        AFF4 implementations.
  */
 
-#include "aff4/rdf.h"
+#include "rdf.h"
 
 namespace aff4 {
 
 #define LEXICON_DEFINE(x, y)                    \
     extern const char x[]
 
-#include "lexicon.inc"
+#include "../lexicon.inc"
 
 #undef LEXICON_DEFINE
 
@@ -125,5 +125,14 @@ class Schema {
 void aff4_lexicon_init();
 
 } // namespace aff4
+
+#include <fmt/format.h>
+
+template <> struct fmt::formatter<aff4::AFF4_IMAGE_COMPRESSION_ENUM_t> {
+    constexpr auto parse(format_parse_context& ctx) { return ctx.begin(); }
+    auto format(const aff4::AFF4_IMAGE_COMPRESSION_ENUM_t& e, format_context& ctx) const {
+        return format_to(ctx.out(), "{}", static_cast<int>(e));
+    }
+};
 
 #endif  // SRC_LEXICON_H_

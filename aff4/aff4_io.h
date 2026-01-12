@@ -25,10 +25,10 @@ specific language governing permissions and limitations under the License.
 #include <fstream>
 #include <cstdio>
 #include <chrono>
-#include "aff4/aff4_base.h"
-#include "aff4/data_store.h"
-#include "aff4/aff4_utils.h"
-#include "aff4/rdf.h"
+#include "aff4_base.h"
+#include "data_store.h"
+#include "aff4_utils.h"
+#include "rdf.h"
 
 // A constant for various buffers used by the AFF4 library.
 #define AFF4_BUFF_SIZE (32 * 1024)

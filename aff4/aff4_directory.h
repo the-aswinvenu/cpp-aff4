@@ -20,10 +20,10 @@ specific language governing permissions and limitations under the License.
 
 #include "aff4/config.h"
 
-#include "aff4/aff4_errors.h"
-#include "aff4/aff4_io.h"
-#include "aff4/aff4_file.h"
-#include "aff4/data_store.h"
+#include "aff4_errors.h"
+#include "aff4_io.h"
+#include "aff4_file.h"
+#include "data_store.h"
 #include <string.h>
 
 
