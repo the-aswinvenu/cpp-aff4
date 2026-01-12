@@ -1,3 +1,8 @@
+# This is an updated codebase of AFF4
+This codebase has been updated to support the latest available versions of the
+dependencies. The CMake build tool is used here instead of Autotools.
+The functionalities are unchanged.
+
 # AFF4 -The Advanced Forensics File Format
 
 The Advanced Forensics File Format 4 (AFF4) is an open source format
@@ -44,6 +49,13 @@ standard https://github.com/aff4/Standard.
 This implementation currently does not implement Section 6. Hashing of
 the standard. This includes verifying or generating linear or block
 hashes.
+
+## Installation (Linux)
+---
+$ mkdir build && cd build
+$ cmake ..
+$ make
+---
 
 ## Copyright
 
