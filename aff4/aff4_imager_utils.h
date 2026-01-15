@@ -26,6 +26,7 @@ specific language governing permissions and limitations under the License.
 #include "data_store.h"
 #include "libaff4.h"
 #include "rdf.h"
+#include "aff4_hash.h"
 
 #include "tclap_parsers.h"
 
@@ -62,6 +63,9 @@ class BasicImager {
 
     // Type of compression we should use.
     AFF4_IMAGE_COMPRESSION_ENUM compression = AFF4_IMAGE_COMPRESSION_ENUM_ZLIB;
+
+    // Hash types to compute during imaging.
+    std::vector<HashType> hash_types_;
 
     /**
      * When this is set the imager will try to abort as soon as possible.
@@ -101,6 +105,8 @@ class BasicImager {
     virtual AFF4Status process_input();
     virtual AFF4Status handle_export();
     virtual AFF4Status handle_compression();
+    virtual AFF4Status handle_hash();
+    virtual AFF4Status handle_verify();
 
     /**
      * This method should be called by imager programs to parse the command line
@@ -241,6 +247,19 @@ class BasicImager {
         AddArg(new TCLAP::ValueArg<int>(
                    "", "threads", "Total number of threads to use.",
                    false, 2, "(default 2)"));
+
+        AddArg(new TCLAP::ValueArg<std::string>(
+                   "H", "hash", "Compute hashes during imaging. Specify a comma-separated "
+                   "list of hash types to compute, or 'all' for all supported types.\n"
+                   "Supported types: md5, sha1, sha256, sha512, blake2b\n"
+                   "Example: --hash sha256,md5",
+                   false, "", "hash types"));
+
+        AddArg(new TCLAP::SwitchArg(
+                   "", "verify", "Verify the integrity of an AFF4 image by recomputing "
+                   "hashes and comparing them against stored values. Requires specifying "
+                   "an AFF4 volume to verify.",
+                   false));
 
         AddArg(new TCLAP::UnlabeledMultiArg<std::string>(
                    "aff4_volumes",

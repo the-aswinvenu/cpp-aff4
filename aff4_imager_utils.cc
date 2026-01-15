@@ -6,8 +6,11 @@
 #include "aff4/libaff4.h"
 #include "aff4/aff4_imager_utils.h"
 #include "aff4/rdf.h"
+#include "aff4/aff4_hash.h"
 #include <iostream>
 #include <string>
+#include <sstream>
+#include <algorithm>
 #include <time.h>
 #include <memory>
 #include "spdlog/spdlog.h"
@@ -143,6 +146,10 @@ AFF4Status BasicImager::ParseArgs() {
         result = handle_compression();
     }
 
+    if (result == CONTINUE && Get("hash")->isSet()) {
+        result = handle_hash();
+    }
+
     if (result == CONTINUE && Get("aff4_volumes")->isSet()) {
         result = handle_aff4_volumes();
     }
@@ -166,6 +173,10 @@ AFF4Status BasicImager::ProcessArgs() {
 
     if (result == CONTINUE && Get("view")->isSet()) {
         result = handle_view();
+    }
+
+    if (result == CONTINUE && Get("verify")->isSet()) {
+        result = handle_verify();
     }
 
     if (result == CONTINUE && Get("export")->isSet()) {
@@ -386,11 +397,27 @@ AFF4Status BasicImager::process_input() {
                 // Set the output compression according to the user's wishes.
                 image_stream->compression = compression;
 
+                // Enable hashing if hash types were specified.
+                if (!hash_types_.empty()) {
+                    image_stream->EnableHashing(hash_types_);
+                }
+
                 // Copy the input stream to the output stream.
                 VolumeManager progress(&resolver, this);
                 progress.ManageStream(image_stream.get());
 
                 RETURN_IF_ERROR(image_stream->WriteStream(input_stream.get(), &progress));
+
+                // If hashing was enabled, log the computed hashes.
+                if (!hash_types_.empty()) {
+                    std::vector<AFF4Hash> computed_hashes;
+                    image_stream->GetComputedHashes(computed_hashes);
+                    for (const auto& hash : computed_hashes) {
+                        resolver.logger->info("  {} hash: {}", 
+                                             HashTypeToString(hash.type), 
+                                             hash.HexDigest());
+                    }
+                }
 
                 // Make this stream as an Image (Should we have
                 // another type for a LogicalImage?
@@ -649,6 +676,161 @@ AFF4Status BasicImager::handle_compression() {
     resolver.logger->info("Setting compression {}", compression_setting);
 
     return CONTINUE;
+}
+
+AFF4Status BasicImager::handle_hash() {
+    std::string hash_setting = GetArg<TCLAP::ValueArg<std::string>>(
+                                   "hash")->getValue();
+
+    // Parse comma-separated hash types
+    std::vector<std::string> hash_names;
+    std::stringstream ss(hash_setting);
+    std::string item;
+    while (std::getline(ss, item, ',')) {
+        // Trim whitespace
+        size_t start = item.find_first_not_of(" \t");
+        size_t end = item.find_last_not_of(" \t");
+        if (start != std::string::npos && end != std::string::npos) {
+            hash_names.push_back(item.substr(start, end - start + 1));
+        }
+    }
+
+    // Convert names to HashType enum values
+    for (const auto& name : hash_names) {
+        std::string lower_name = name;
+        std::transform(lower_name.begin(), lower_name.end(), lower_name.begin(), ::tolower);
+
+        if (lower_name == "all") {
+            // Add all supported hash types
+            hash_types_.push_back(HashType::HASH_MD5);
+            hash_types_.push_back(HashType::HASH_SHA1);
+            hash_types_.push_back(HashType::HASH_SHA256);
+            hash_types_.push_back(HashType::HASH_SHA512);
+            hash_types_.push_back(HashType::HASH_BLAKE2B);
+            resolver.logger->info("Will compute all hash types");
+            break;
+        } else if (lower_name == "md5") {
+            hash_types_.push_back(HashType::HASH_MD5);
+        } else if (lower_name == "sha1") {
+            hash_types_.push_back(HashType::HASH_SHA1);
+        } else if (lower_name == "sha256") {
+            hash_types_.push_back(HashType::HASH_SHA256);
+        } else if (lower_name == "sha512") {
+            hash_types_.push_back(HashType::HASH_SHA512);
+        } else if (lower_name == "blake2b") {
+            hash_types_.push_back(HashType::HASH_BLAKE2B);
+        } else {
+            resolver.logger->error("Unknown hash type: {}", name);
+            return INVALID_INPUT;
+        }
+    }
+
+    if (hash_types_.size() > 0) {
+        std::string types_str;
+        for (size_t i = 0; i < hash_types_.size(); ++i) {
+            if (i > 0) types_str += ", ";
+            types_str += HashTypeToString(hash_types_[i]);
+        }
+        resolver.logger->info("Will compute hashes: {}", types_str);
+    }
+
+    return CONTINUE;
+}
+
+AFF4Status BasicImager::handle_verify() {
+    resolver.logger->info("Verifying image integrity...");
+
+    int total_verified = 0;
+    int total_passed = 0;
+    int total_failed = 0;
+    int total_no_hash = 0;
+
+    // Query for all AFF4Image objects
+    URN image_type(AFF4_IMAGE_TYPE);
+    for (const auto& urn : resolver.Query(URN(AFF4_TYPE), &image_type)) {
+        resolver.logger->info("Verifying: {}", urn.SerializeToString());
+
+        // Get stored hashes for this image
+        std::vector<AFF4Hash> stored_hashes;
+        AFF4Status status = GetAllImageHashes(&resolver, urn, stored_hashes);
+
+        if (status != STATUS_OK || stored_hashes.empty()) {
+            resolver.logger->warn("  No stored hashes found for this image");
+            total_no_hash++;
+            continue;
+        }
+
+        // Open the image stream to recompute hashes
+        AFF4Flusher<AFF4Stream> stream;
+        status = volume_objs.GetStream(urn, stream);
+        if (status != STATUS_OK) {
+            resolver.logger->error("  Failed to open image stream");
+            total_failed++;
+            continue;
+        }
+
+        // Set up multi-hasher for the stored hash types
+        MultiHasher hasher;
+        for (const auto& hash : stored_hashes) {
+            hasher.AddHashType(hash.type);
+        }
+        hasher.Init();
+
+        // Read the stream and compute hashes
+        const size_t buffer_size = 1024 * 1024;  // 1MB chunks
+        
+        stream->Seek(0, SEEK_SET);
+        while (true) {
+            std::string data = stream->Read(buffer_size);
+            if (data.empty()) {
+                break;
+            }
+            hasher.Update(data.data(), data.size());
+        }
+
+        std::vector<AFF4Hash> computed_hashes;
+        hasher.Finalize(computed_hashes);
+
+        // Compare computed vs stored hashes
+        bool all_match = true;
+        for (const auto& stored : stored_hashes) {
+            bool found_match = false;
+            for (const auto& computed : computed_hashes) {
+                if (stored.type == computed.type) {
+                    if (stored == computed) {
+                        resolver.logger->info("  {} hash: OK", HashTypeToString(stored.type));
+                        found_match = true;
+                    } else {
+                        resolver.logger->error("  {} hash: MISMATCH", HashTypeToString(stored.type));
+                        resolver.logger->error("    Expected: {}", stored.HexDigest());
+                        resolver.logger->error("    Computed: {}", computed.HexDigest());
+                        all_match = false;
+                    }
+                    break;
+                }
+            }
+            if (!found_match && all_match) {
+                resolver.logger->error("  {} hash: Not computed", HashTypeToString(stored.type));
+                all_match = false;
+            }
+        }
+
+        total_verified++;
+        if (all_match) {
+            total_passed++;
+        } else {
+            total_failed++;
+        }
+    }
+
+    resolver.logger->info("Verification complete: {} verified, {} passed, {} failed, {} without hashes",
+                          total_verified, total_passed, total_failed, total_no_hash);
+
+    if (total_failed > 0) {
+        return GENERIC_ERROR;
+    }
+
+    return STATUS_OK;
 }
 
 #ifdef _WIN32

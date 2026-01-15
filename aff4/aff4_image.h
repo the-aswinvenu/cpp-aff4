@@ -19,6 +19,7 @@ specific language governing permissions and limitations under the License.
 #include "aff4/config.h"
 #include "aff4_io.h"
 #include "volume_group.h"
+#include "aff4_hash.h"
 
 #include <unordered_map>
 
@@ -133,6 +134,11 @@ class AFF4Image: public AFF4Stream {
     // the current volume.
     bool checkpointed = true;
 
+    // Hash computation for image integrity
+    std::unique_ptr<MultiHasher> image_hasher_;
+    bool hashing_enabled_ = false;
+    std::vector<AFF4Hash> computed_hashes_;
+
   public:
     AFF4Image(DataStore* resolver, URN urn);
 
@@ -149,6 +155,35 @@ class AFF4Image: public AFF4Stream {
 
     // Which compression should we use.
     AFF4_IMAGE_COMPRESSION_ENUM compression = AFF4_IMAGE_COMPRESSION_ENUM_DEFLATE;
+
+    /**
+     * Enable hash computation during imaging.
+     *
+     * Call this before writing data to compute hashes. Once enabled,
+     * the specified hash types will be computed over all data written
+     * and stored in the metadata when the image is finalized.
+     *
+     * @param types Vector of hash types to compute. If empty, defaults
+     *              to SHA256.
+     * @return STATUS_OK on success.
+     */
+    AFF4Status EnableHashing(const std::vector<HashType>& types = {});
+
+    /**
+     * Enable hash computation with a single hash type.
+     */
+    AFF4Status EnableHashing(HashType type);
+
+    /**
+     * Check if hashing is enabled.
+     */
+    bool IsHashingEnabled() const { return hashing_enabled_; }
+
+    /**
+     * Get the computed hashes after the image is finalized.
+     * Only valid after Flush() has been called.
+     */
+    AFF4Status GetComputedHashes(std::vector<AFF4Hash>& hashes) const;
 
     static AFF4Status NewAFF4Image(
         DataStore* resolver,
@@ -192,6 +227,30 @@ class AFF4Image: public AFF4Stream {
     AFF4Status ReadBuffer(char* data, size_t* length) override;
 
     AFF4Status Flush() override;
+
+    /**
+     * Verify the image by recomputing hashes and comparing to stored values.
+     *
+     * This reads the entire image stream, computes hashes using the same
+     * algorithms that were stored in the metadata, and compares the results.
+     *
+     * @param result Output: Detailed verification result including each hash
+     *               comparison.
+     * @param progress Optional progress callback for long operations.
+     * @return STATUS_OK if verification completed (check result.Passed() for
+     *         actual verification outcome), or error status if verification
+     *         could not be performed.
+     */
+    AFF4Status VerifyHash(ImageVerifyResult& result,
+                          ProgressContext* progress = nullptr);
+
+    /**
+     * Get the stored hashes for this image from metadata.
+     *
+     * @param hashes Output: Vector of hashes stored in the image metadata.
+     * @return STATUS_OK on success, NOT_FOUND if no hashes stored.
+     */
+    AFF4Status GetStoredHashes(std::vector<AFF4Hash>& hashes) const;
 
     using AFF4Stream::Write;
 };

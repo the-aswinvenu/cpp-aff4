@@ -38,6 +38,7 @@ find_library(SNAPPY_LIB snappy REQUIRED)
 find_library(LZ4_LIB lz4 REQUIRED)
 find_library(FMT_LIB fmt)
 find_package(Threads REQUIRED)
+find_package(OpenSSL REQUIRED)
 
 # Optional dependencies
 if(WITH_YAML)
@@ -77,6 +78,9 @@ file(WRITE ${CONFIG_H}
 
 /* Optional features */
 #define HAVE_LIBPTHREAD 1
+
+/* Cryptographic hashing support */
+#define HAVE_OPENSSL 1
 "
 )
 
@@ -102,6 +106,7 @@ set(AFF4_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/libaff4.cc
     ${CMAKE_CURRENT_SOURCE_DIR}/libaff4-c.cc
     ${CMAKE_CURRENT_SOURCE_DIR}/tclap_parsers.cc
+    ${CMAKE_CURRENT_SOURCE_DIR}/aff4_hash.cc
 )
 
 # ---- Create Library Target ----
@@ -125,6 +130,7 @@ target_include_directories(aff4
         ${SPDLOG_INCLUDE_DIRS}
         ${URIPARSER_INCLUDE_DIRS}
         ${UUID_INCLUDE_DIRS}
+        ${OPENSSL_INCLUDE_DIR}
 )
 
 # ---- Link Libraries ----
@@ -140,6 +146,8 @@ target_link_libraries(aff4
         ${UUID_LIBRARIES}
         ${FMT_LIB}
         Threads::Threads
+        OpenSSL::SSL
+        OpenSSL::Crypto
 )
 
 if(WITH_YAML AND yaml-cpp_FOUND)
@@ -165,6 +173,33 @@ if(BUILD_EXECUTABLES)
     
     # Installation
     install(TARGETS aff4imager DESTINATION bin)
+endif()
+
+# ---- Build Tests ----
+if(BUILD_TESTS)
+    # Basic hash tests
+    add_executable(test_hash ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_hash.cc)
+    target_link_libraries(test_hash PRIVATE aff4)
+    target_include_directories(test_hash PRIVATE 
+        ${CMAKE_CURRENT_SOURCE_DIR}
+        ${CMAKE_BINARY_DIR}
+    )
+    
+    # Image hash tests
+    add_executable(test_image_hash ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_image_hash.cc)
+    target_link_libraries(test_image_hash PRIVATE aff4)
+    target_include_directories(test_image_hash PRIVATE 
+        ${CMAKE_CURRENT_SOURCE_DIR}
+        ${CMAKE_BINARY_DIR}
+    )
+    
+    # Comprehensive hash tests
+    add_executable(test_comprehensive_hash ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_comprehensive_hash.cc)
+    target_link_libraries(test_comprehensive_hash PRIVATE aff4)
+    target_include_directories(test_comprehensive_hash PRIVATE 
+        ${CMAKE_CURRENT_SOURCE_DIR}
+        ${CMAKE_BINARY_DIR}
+    )
 endif()
 
 # ---- Installation ----
@@ -200,6 +235,7 @@ message(STATUS "  - SNAPPY:           ${SNAPPY_LIB}")
 message(STATUS "  - LZ4:              ${LZ4_LIB}")
 message(STATUS "  - TCLAP:            ${TCLAP_FOUND}")
 message(STATUS "  - Threads:          ${CMAKE_HAVE_THREADS_LIBRARY}")
+message(STATUS "  - OpenSSL:          ${OPENSSL_FOUND}")
 if(WITH_YAML)
     message(STATUS "  - yaml-cpp:         ${yaml-cpp_FOUND}")
 endif()

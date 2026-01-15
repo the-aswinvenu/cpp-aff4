@@ -15,6 +15,7 @@ specific language governing permissions and limitations under the License.
 
 #include "aff4/lexicon.h"
 #include "aff4/aff4_image.h"
+#include "aff4/aff4_hash.h"
 #include "aff4/libaff4.h"
 #include <zlib.h>
 #include <snappy.h>
@@ -332,15 +333,20 @@ class _CompressorStream: public AFF4Stream {
     size_t chunk_size;
     int chunks_per_segment;
 
+    // Optional hasher for computing image hash
+    MultiHasher* hasher_ = nullptr;
+
   public:
     _BevyWriter bevy_writer;
 
     _CompressorStream(DataStore* resolver,
                       AFF4_IMAGE_COMPRESSION_ENUM compression,
                       size_t chunk_size,
-                      int chunks_per_segment, AFF4Stream* source):
+                      int chunks_per_segment, AFF4Stream* source,
+                      MultiHasher* hasher = nullptr):
         AFF4Stream(resolver), source(source), initial_offset(source->Tell()),
         chunk_size(chunk_size), chunks_per_segment(chunks_per_segment),
+        hasher_(hasher),
         bevy_writer(resolver, compression, chunk_size,
                     chunks_per_segment) {}
 
@@ -353,6 +359,12 @@ class _CompressorStream: public AFF4Stream {
             if (data.size() == 0) {
                 break;
             }
+
+            // Update hash with uncompressed data if hasher is provided
+            if (hasher_) {
+                RETURN_IF_ERROR(hasher_->Update(data.data(), data.size()));
+            }
+
             size += data.size();
             bevy_writer.EnqueueCompressChunk(chunk_id, data);
         }
@@ -563,6 +575,11 @@ AFF4Status AFF4Image::Write(const char* data, size_t length) {
     // This object is now dirty.
     MarkDirty();
 
+    // Update hash with incoming data if hashing is enabled
+    if (hashing_enabled_ && image_hasher_) {
+        RETURN_IF_ERROR(image_hasher_->Update(data, length));
+    }
+
     // Append small reads to the buffer.
     buffer.append(data, length);
     size_t offset = 0;
@@ -602,6 +619,45 @@ AFF4Image::AFF4Image(DataStore* resolver):
     AFF4Stream(resolver) {}
 
 
+// ============================================================================
+// Hash Integration
+// ============================================================================
+
+AFF4Status AFF4Image::EnableHashing(const std::vector<HashType>& types) {
+    if (hashing_enabled_) {
+        // Already enabled - don't reinitialize
+        return STATUS_OK;
+    }
+
+    image_hasher_ = std::make_unique<MultiHasher>();
+
+    std::vector<HashType> hash_types = types;
+    if (hash_types.empty()) {
+        // Default to SHA256 if no types specified
+        hash_types.push_back(HashType::HASH_SHA256);
+    }
+
+    RETURN_IF_ERROR(image_hasher_->AddHashTypes(hash_types));
+    RETURN_IF_ERROR(image_hasher_->Init());
+
+    hashing_enabled_ = true;
+    return STATUS_OK;
+}
+
+AFF4Status AFF4Image::EnableHashing(HashType type) {
+    return EnableHashing(std::vector<HashType>{type});
+}
+
+AFF4Status AFF4Image::GetComputedHashes(std::vector<AFF4Hash>& hashes) const {
+    if (!hashing_enabled_) {
+        return NOT_FOUND;
+    }
+
+    hashes = computed_hashes_;
+    return STATUS_OK;
+}
+
+
 AFF4Status AFF4Image::WriteStream(AFF4Stream* source,
                                   ProgressContext* progress) {
     DefaultProgress default_progress(resolver);
@@ -612,8 +668,10 @@ AFF4Status AFF4Image::WriteStream(AFF4Stream* source,
     // Write a bevy at a time.
     while (1) {
         // This looks like a stream but can only read a bevy at a time.
+        // Pass the hasher if hashing is enabled.
         _CompressorStream stream(resolver, compression, chunk_size,
-                                 chunks_per_segment, source);
+                                 chunks_per_segment, source,
+                                 hashing_enabled_ ? image_hasher_.get() : nullptr);
 
         // Read and compress the bevy into memory.
         RETURN_IF_ERROR(stream.PrepareBevy());
@@ -895,6 +953,31 @@ AFF4Status AFF4Image::_write_metadata() {
     resolver->Set(urn, AFF4_IMAGE_COMPRESSION, new URN(
                       CompressionMethodToURN(compression)));
 
+    // Finalize and store hashes if hashing is enabled
+    if (hashing_enabled_ && image_hasher_) {
+        // Only finalize once - check if we have results already
+        if (computed_hashes_.empty()) {
+            AFF4Status status = image_hasher_->Finalize(computed_hashes_);
+            if (status != STATUS_OK) {
+                resolver->logger->warn("Failed to finalize hash computation");
+                return status;
+            }
+        }
+
+        // Store each computed hash in the metadata
+        for (const AFF4Hash& hash : computed_hashes_) {
+            AFF4Status status = StoreImageHash(resolver, urn, hash);
+            if (status != STATUS_OK) {
+                resolver->logger->warn("Failed to store {} hash",
+                                       HashTypeToString(hash.type));
+            } else {
+                resolver->logger->info("Stored {} hash: {}",
+                                       HashTypeToString(hash.type),
+                                       hash.HexDigest());
+            }
+        }
+    }
+
     return STATUS_OK;
 }
 
@@ -943,5 +1026,174 @@ std::string AFF4Image::_FixupBevyData(std::string* data){
         index_size * sizeof(BevyIndex)
     );
 }
+
+
+// ============================================================================
+// Hash Verification
+// ============================================================================
+
+AFF4Status AFF4Image::GetStoredHashes(std::vector<AFF4Hash>& hashes) const {
+    hashes.clear();
+
+    // Try to get image-level hashes (linearHash* attributes)
+    AFF4Status status = GetAllImageHashes(resolver, urn, hashes);
+    if (status != STATUS_OK) {
+        return status;
+    }
+
+    // If no image hashes found, try standard hash attributes
+    if (hashes.empty()) {
+        status = GetAllHashes(resolver, urn, hashes);
+    }
+
+    if (hashes.empty()) {
+        return NOT_FOUND;
+    }
+
+    return STATUS_OK;
+}
+
+AFF4Status AFF4Image::VerifyHash(ImageVerifyResult& result,
+                                  ProgressContext* progress) {
+    result = ImageVerifyResult();
+    result.image_urn = urn;
+
+    // Get stored hashes from metadata
+    std::vector<AFF4Hash> stored_hashes;
+    AFF4Status status = GetStoredHashes(stored_hashes);
+    if (status != STATUS_OK) {
+        if (status == NOT_FOUND) {
+            result.error_message = "No hashes stored in image metadata";
+        } else {
+            result.error_message = "Failed to retrieve stored hashes";
+        }
+        result.all_passed = false;
+        return status;
+    }
+
+    if (stored_hashes.empty()) {
+        result.error_message = "No hashes found for verification";
+        result.all_passed = false;
+        return NOT_FOUND;
+    }
+
+    // Create a multi-hasher with the same types as stored
+    MultiHasher hasher;
+    for (const auto& h : stored_hashes) {
+        status = hasher.AddHashType(h.type);
+        if (status != STATUS_OK) {
+            result.error_message = "Failed to initialize hasher for " +
+                                   HashTypeToString(h.type);
+            result.all_passed = false;
+            return status;
+        }
+    }
+
+    status = hasher.Init();
+    if (status != STATUS_OK) {
+        result.error_message = "Failed to initialize hash computation";
+        result.all_passed = false;
+        return status;
+    }
+
+    // Read entire image and compute hashes
+    DefaultProgress default_progress(resolver);
+    if (!progress) {
+        progress = &default_progress;
+    }
+
+    // Save and restore read pointer
+    aff4_off_t original_readptr = readptr;
+    Seek(0, SEEK_SET);
+
+    const size_t buffer_size = chunk_size * 16;  // Read multiple chunks at once
+    std::unique_ptr<char[]> buffer(new char[buffer_size]);
+
+    aff4_off_t total_size = Size();
+    aff4_off_t bytes_read = 0;
+
+    while (bytes_read < total_size) {
+        size_t to_read = std::min(static_cast<size_t>(total_size - bytes_read), buffer_size);
+        size_t actually_read = to_read;
+
+        status = ReadBuffer(buffer.get(), &actually_read);
+        if (status != STATUS_OK) {
+            result.error_message = "Failed to read image data at offset " +
+                                   std::to_string(bytes_read);
+            result.all_passed = false;
+            Seek(original_readptr, SEEK_SET);
+            return status;
+        }
+
+        if (actually_read == 0) {
+            break;  // EOF
+        }
+
+        status = hasher.Update(buffer.get(), actually_read);
+        if (status != STATUS_OK) {
+            result.error_message = "Failed to update hash at offset " +
+                                   std::to_string(bytes_read);
+            result.all_passed = false;
+            Seek(original_readptr, SEEK_SET);
+            return status;
+        }
+
+        bytes_read += actually_read;
+
+        if (!progress->Report(bytes_read)) {
+            result.error_message = "Verification aborted by user";
+            result.all_passed = false;
+            Seek(original_readptr, SEEK_SET);
+            return ABORTED;
+        }
+    }
+
+    // Restore read pointer
+    Seek(original_readptr, SEEK_SET);
+
+    // Finalize and get computed hashes
+    std::vector<AFF4Hash> computed_hashes;
+    status = hasher.Finalize(computed_hashes);
+    if (status != STATUS_OK) {
+        result.error_message = "Failed to finalize hash computation";
+        result.all_passed = false;
+        return status;
+    }
+
+    // Compare stored vs computed hashes
+    result.all_passed = true;
+    for (const auto& stored : stored_hashes) {
+        HashVerifyResult hr;
+        hr.type = stored.type;
+        hr.expected = stored;
+
+        // Find matching computed hash
+        bool found = false;
+        for (const auto& computed : computed_hashes) {
+            if (computed.type == stored.type) {
+                hr.computed = computed;
+                // Use the global VerifyHash function (not the method)
+                hr.matches = aff4::VerifyHash(stored, computed);
+                found = true;
+                break;
+            }
+        }
+
+        if (!found) {
+            hr.matches = false;
+            result.error_message = "Could not compute " +
+                                   HashTypeToString(stored.type) + " hash";
+        }
+
+        if (!hr.matches) {
+            result.all_passed = false;
+        }
+
+        result.hash_results.push_back(std::move(hr));
+    }
+
+    return STATUS_OK;
+}
+
 
 } // namespace aff4

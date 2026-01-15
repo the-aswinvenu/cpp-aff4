@@ -216,3 +216,31 @@ LEXICON_DEFINE(AFF4_HASH_SHA256, "http://aff4.org/Schema#SHA256");
 LEXICON_DEFINE(AFF4_HASH_SHA512, "http://aff4.org/Schema#SHA512");
 LEXICON_DEFINE(AFF4_HASH_BLAKE2B, "http://aff4.org/Schema#blake2b");
 
+// Block and Map hash attributes.
+// Per-block hash (hash of each image block/chunk)
+LEXICON_DEFINE(AFF4_BLOCK_MAP_HASH, "http://aff4.org/Schema#blockMapHash");
+LEXICON_DEFINE(AFF4_BLOCK_HASHES_HASH, "http://aff4.org/Schema#blockHashesHash");
+
+// Map component hashes (for AFF4 Map streams)
+LEXICON_DEFINE(AFF4_MAP_HASH, "http://aff4.org/Schema#mapHash");
+LEXICON_DEFINE(AFF4_MAP_IDX_HASH, "http://aff4.org/Schema#mapIdxHash");
+LEXICON_DEFINE(AFF4_MAP_POINT_HASH, "http://aff4.org/Schema#mapPointHash");
+LEXICON_DEFINE(AFF4_MAP_PATH_HASH, "http://aff4.org/Schema#mapPathHash");
+
+// Dependent stream (stream that this object's hash depends on)
+LEXICON_DEFINE(AFF4_DEPENDENT_STREAM, "http://aff4.org/Schema#dependentStream");
+
+// Linear (image-level) hash URIs for specific algorithms
+LEXICON_DEFINE(AFF4_IMAGE_HASH_MD5, "http://aff4.org/Schema#linearHashMD5");
+LEXICON_DEFINE(AFF4_IMAGE_HASH_SHA1, "http://aff4.org/Schema#linearHashSHA1");
+LEXICON_DEFINE(AFF4_IMAGE_HASH_SHA256, "http://aff4.org/Schema#linearHashSHA256");
+LEXICON_DEFINE(AFF4_IMAGE_HASH_SHA512, "http://aff4.org/Schema#linearHashSHA512");
+LEXICON_DEFINE(AFF4_IMAGE_HASH_BLAKE2B, "http://aff4.org/Schema#linearHashBlake2b");
+
+// Block-level hash URIs for specific algorithms
+LEXICON_DEFINE(AFF4_BLOCK_HASH_MD5, "http://aff4.org/Schema#blockHashMD5");
+LEXICON_DEFINE(AFF4_BLOCK_HASH_SHA1, "http://aff4.org/Schema#blockHashSHA1");
+LEXICON_DEFINE(AFF4_BLOCK_HASH_SHA256, "http://aff4.org/Schema#blockHashSHA256");
+LEXICON_DEFINE(AFF4_BLOCK_HASH_SHA512, "http://aff4.org/Schema#blockHashSHA512");
+LEXICON_DEFINE(AFF4_BLOCK_HASH_BLAKE2B, "http://aff4.org/Schema#blockHashBlake2b");
+
