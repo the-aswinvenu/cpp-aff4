@@ -56,6 +56,32 @@ AFF4Status VolumeGroup::GetStream(URN stream_urn, AFF4Flusher<AFF4Stream> &resul
                     // TODO: This can get recursive. Protect against abuse.
                     return GetStream(delegate, result);
                 }
+                
+                // If there's no dataStream, check if this also has a concrete
+                // stream type (ImageStream, Map) which will be handled later
+                // in the loop. Only fall back to segment if no concrete type.
+                bool has_concrete_type = false;
+                for (auto &other_type : types) {
+                    std::string other_type_str(other_type->SerializeToString());
+                    if (other_type_str == AFF4_IMAGESTREAM_TYPE ||
+                        other_type_str == AFF4_LEGACY_IMAGESTREAM_TYPE ||
+                        other_type_str == AFF4_MAP_TYPE) {
+                        has_concrete_type = true;
+                        break;
+                    }
+                }
+                
+                // If no concrete stream type, this might be a small file stored
+                // directly as a zip segment. Try to open it from the volume.
+                if (!has_concrete_type) {
+                    URN owner;
+                    if (STATUS_OK == resolver->Get(stream_urn, AFF4_STORED, owner)) {
+                        auto it = volume_objs.find(owner);
+                        if (it != volume_objs.end()) {
+                            return (it->second->OpenMemberStream(stream_urn, result));
+                        }
+                    }
+                }
             }
 
             if (type_str == AFF4_MAP_TYPE) {

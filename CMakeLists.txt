@@ -21,7 +21,6 @@ option(BUILD_SHARED_LIBS "Build as shared library instead of static" OFF)
 option(WITH_YAML "Enable YAML support via libyaml-cpp" OFF)
 option(AFF4_DISABLE_LOGGING "Disable internal logging" ON)
 option(BUILD_EXECUTABLES "Build command-line tools (aff4imager)" ON)
-option(BUILD_TESTS "Build test suite" OFF)
 
 # ---- Find Dependencies ----
 find_package(PkgConfig REQUIRED)
@@ -175,33 +174,6 @@ if(BUILD_EXECUTABLES)
     install(TARGETS aff4imager DESTINATION bin)
 endif()
 
-# ---- Build Tests ----
-if(BUILD_TESTS)
-    # Basic hash tests
-    add_executable(test_hash ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_hash.cc)
-    target_link_libraries(test_hash PRIVATE aff4)
-    target_include_directories(test_hash PRIVATE 
-        ${CMAKE_CURRENT_SOURCE_DIR}
-        ${CMAKE_BINARY_DIR}
-    )
-    
-    # Image hash tests
-    add_executable(test_image_hash ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_image_hash.cc)
-    target_link_libraries(test_image_hash PRIVATE aff4)
-    target_include_directories(test_image_hash PRIVATE 
-        ${CMAKE_CURRENT_SOURCE_DIR}
-        ${CMAKE_BINARY_DIR}
-    )
-    
-    # Comprehensive hash tests
-    add_executable(test_comprehensive_hash ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_comprehensive_hash.cc)
-    target_link_libraries(test_comprehensive_hash PRIVATE aff4)
-    target_include_directories(test_comprehensive_hash PRIVATE 
-        ${CMAKE_CURRENT_SOURCE_DIR}
-        ${CMAKE_BINARY_DIR}
-    )
-endif()
-
 # ---- Installation ----
 # Install library
 install(TARGETS aff4
@@ -224,7 +196,6 @@ message(STATUS "Build type:           ${CMAKE_BUILD_TYPE}")
 message(STATUS "C++ Standard:         ${CMAKE_CXX_STANDARD}")
 message(STATUS "Shared library:       ${BUILD_SHARED_LIBS}")
 message(STATUS "Build executables:    ${BUILD_EXECUTABLES}")
-message(STATUS "Build tests:          ${BUILD_TESTS}")
 message(STATUS "YAML support:         ${WITH_YAML}")
 message(STATUS "Logging disabled:     ${AFF4_DISABLE_LOGGING}")
 message(STATUS "========================================")

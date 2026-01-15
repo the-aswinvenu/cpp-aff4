@@ -59,28 +59,31 @@ AFF4Status DeCompressZlib_(const std::string &input, std::string* output) {
 
 AFF4Status CompressDeflate_(const std::string &input, std::string* output) {
     z_stream zs{};
-    if (deflateInit(&zs, Z_DEFAULT_COMPRESSION) != Z_OK) {
+    // Use raw deflate format (no zlib header) with -15 window bits
+    if (deflateInit2(&zs, Z_DEFAULT_COMPRESSION, Z_DEFLATED, -15,
+                     8, Z_DEFAULT_STRATEGY) != Z_OK) {
         return MEMORY_ERROR;
     }
-
-    int ret = Z_OK;
 
     zs.next_in = (Bytef *) input.c_str();
     zs.avail_in = input.length();
 
     auto size = deflateBound(&zs, input.length());
 
-    // Allocate space for another chunk of output
+    // Allocate space for compressed output
     output->resize(size);
 
     zs.avail_out = size;
-    zs.next_out = (Bytef*) &output->back() - (size - 1);
+    zs.next_out = reinterpret_cast<Bytef*>(&(*output)[0]);
 
-    ret = deflate(&zs, Z_FINISH);
+    int ret = deflate(&zs, Z_FINISH);
     if (ret != Z_STREAM_END) {
+        deflateEnd(&zs);
         return IO_ERROR;
     }
 
+    // Resize output to actual compressed size
+    output->resize(zs.total_out);
     deflateEnd(&zs);
 
     return STATUS_OK;
@@ -88,28 +91,22 @@ AFF4Status CompressDeflate_(const std::string &input, std::string* output) {
 
 
 AFF4Status DeCompressDeflate_(const std::string &input, std::string* output) {
-    constexpr size_t chunk_size = 16 * 1024;
-
     z_stream zs{};
-    if (inflateInit(&zs) != Z_OK) {
+    // Use raw deflate format (no zlib header) with -15 window bits
+    if (inflateInit2(&zs, -15) != Z_OK) {
         return MEMORY_ERROR;
     }
 
-    int ret = Z_OK;
+    // Use the pre-allocated buffer size as output capacity
+    size_t buffer_size = output->size();
 
     zs.next_in = (Bytef *) input.c_str();
     zs.avail_in = input.length();
+    zs.avail_out = buffer_size;
+    zs.next_out = reinterpret_cast<Bytef*>(&(*output)[0]);
 
-    while (ret == Z_OK) {
-        // Allocate space for another chunk of output
-        output->resize(output->size() + chunk_size);
-
-        zs.avail_out = chunk_size;
-        zs.next_out = (Bytef*) &output->back() - (chunk_size - 1);
-
-        ret = inflate(&zs, Z_SYNC_FLUSH);
-    }
-
+    int ret = inflate(&zs, Z_FINISH);
+    
     output->resize(zs.total_out);
     inflateEnd(&zs);
 

@@ -175,8 +175,12 @@ AFF4Status BasicImager::ProcessArgs() {
         result = handle_view();
     }
 
-    if (result == CONTINUE && Get("verify")->isSet()) {
-        result = handle_verify();
+    // Verify can run after view (they often go together with -V --verify)
+    if (Get("verify")->isSet()) {
+        AFF4Status verify_result = handle_verify();
+        if (verify_result != STATUS_OK && verify_result != CONTINUE) {
+            result = verify_result;
+        }
     }
 
     if (result == CONTINUE && Get("export")->isSet()) {
@@ -374,8 +378,35 @@ AFF4Status BasicImager::process_input() {
                 VolumeManager progress(&resolver, this);
                 progress.ManageStream(segment.get());
 
-                // Copy the input stream to the output stream.
-                RETURN_IF_ERROR(segment->WriteStream(input_stream.get(), &progress));
+                // Set up hashing for small files if requested
+                std::unique_ptr<MultiHasher> hasher;
+                if (!hash_types_.empty()) {
+                    hasher = std::make_unique<MultiHasher>();
+                    for (auto type : hash_types_) {
+                        hasher->AddHashType(type);
+                    }
+                    hasher->Init();
+                }
+
+                // Read, hash, and write the data
+                input_stream->Seek(0, SEEK_SET);
+                while (true) {
+                    std::string buffer = input_stream->Read(1024 * 1024);
+                    if (buffer.empty()) break;
+                    if (hasher) {
+                        hasher->Update(buffer.data(), buffer.size());
+                    }
+                    segment->Write(buffer.data(), buffer.size());
+                }
+
+                // Store computed hashes in metadata
+                if (hasher) {
+                    std::vector<AFF4Hash> computed_hashes;
+                    hasher->Finalize(computed_hashes);
+                    for (const auto& hash : computed_hashes) {
+                        StoreImageHash(&resolver, segment->urn, hash);
+                    }
+                }
 
                 // Make this stream as an Image (Should we have
                 // another type for a LogicalImage?
@@ -739,6 +770,7 @@ AFF4Status BasicImager::handle_hash() {
 
 AFF4Status BasicImager::handle_verify() {
     resolver.logger->info("Verifying image integrity...");
+    std::cout << "Verifying image integrity..." << std::endl;
 
     int total_verified = 0;
     int total_passed = 0;
@@ -749,6 +781,7 @@ AFF4Status BasicImager::handle_verify() {
     URN image_type(AFF4_IMAGE_TYPE);
     for (const auto& urn : resolver.Query(URN(AFF4_TYPE), &image_type)) {
         resolver.logger->info("Verifying: {}", urn.SerializeToString());
+        std::cout << "  " << urn.SerializeToString() << std::endl;
 
         // Get stored hashes for this image
         std::vector<AFF4Hash> stored_hashes;
@@ -756,6 +789,7 @@ AFF4Status BasicImager::handle_verify() {
 
         if (status != STATUS_OK || stored_hashes.empty()) {
             resolver.logger->warn("  No stored hashes found for this image");
+            std::cout << "    No stored hashes found" << std::endl;
             total_no_hash++;
             continue;
         }
@@ -765,6 +799,7 @@ AFF4Status BasicImager::handle_verify() {
         status = volume_objs.GetStream(urn, stream);
         if (status != STATUS_OK) {
             resolver.logger->error("  Failed to open image stream");
+            std::cerr << "    ERROR: Failed to open image stream" << std::endl;
             total_failed++;
             continue;
         }
@@ -799,11 +834,15 @@ AFF4Status BasicImager::handle_verify() {
                 if (stored.type == computed.type) {
                     if (stored == computed) {
                         resolver.logger->info("  {} hash: OK", HashTypeToString(stored.type));
+                        std::cout << "    " << HashTypeToString(stored.type) << ": OK" << std::endl;
                         found_match = true;
                     } else {
                         resolver.logger->error("  {} hash: MISMATCH", HashTypeToString(stored.type));
                         resolver.logger->error("    Expected: {}", stored.HexDigest());
                         resolver.logger->error("    Computed: {}", computed.HexDigest());
+                        std::cerr << "    " << HashTypeToString(stored.type) << ": MISMATCH" << std::endl;
+                        std::cerr << "      Expected: " << stored.HexDigest() << std::endl;
+                        std::cerr << "      Computed: " << computed.HexDigest() << std::endl;
                         all_match = false;
                     }
                     break;
@@ -811,6 +850,7 @@ AFF4Status BasicImager::handle_verify() {
             }
             if (!found_match && all_match) {
                 resolver.logger->error("  {} hash: Not computed", HashTypeToString(stored.type));
+                std::cerr << "    " << HashTypeToString(stored.type) << ": Not computed" << std::endl;
                 all_match = false;
             }
         }
@@ -825,6 +865,9 @@ AFF4Status BasicImager::handle_verify() {
 
     resolver.logger->info("Verification complete: {} verified, {} passed, {} failed, {} without hashes",
                           total_verified, total_passed, total_failed, total_no_hash);
+    std::cout << std::endl << "Verification complete: " << total_verified << " verified, " 
+              << total_passed << " passed, " << total_failed << " failed, " 
+              << total_no_hash << " without hashes" << std::endl;
 
     if (total_failed > 0) {
         return GENERIC_ERROR;
